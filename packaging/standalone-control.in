@@ -4,6 +4,7 @@ Section: graphics
 Priority: optional
 Architecture: @ARCH@
 Installed-Size: @INSTALLED_SIZE@
+Depends: libfontconfig1, libfreetype6, libpng16-16, libtcl8.6, libtk8.6, libx11-6, libxau6, libxdmcp6, libxext6, libxft2, libxrender1, libxss1
 Maintainer: VIAR Scanner local package
 Description: VIAR-500A document scanner for Astra Linux
  Standalone graphical application for V4L2 capture, automatic page detection,

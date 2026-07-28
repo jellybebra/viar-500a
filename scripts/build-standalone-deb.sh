@@ -2,7 +2,7 @@
 set -eu
 
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=${1:-0.4.0}
+VERSION=${1:-0.4.1}
 ARCH=$(dpkg --print-architecture)
 OUTPUT="$PROJECT_DIR/viar-scanner_${VERSION}_${ARCH}.deb"
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/viar-scanner-build.XXXXXX")
@@ -53,6 +53,29 @@ python3 -m venv "$VENV"
     --collect-all customtkinter \
     --hidden-import PIL._tkinter_finder \
     "$PROJECT_DIR/packaging/viar-scanner-entry.py"
+
+# PyInstaller copies the Ubuntu build runner's X11/Tk stack into the bundle.
+# Those libraries are ABI-compatible enough to start on Astra, but crash in
+# _XReply() as soon as Tk creates the first scanned-page thumbnail.  A graphical
+# Astra installation already provides this stack, so keep the Python/OpenCV
+# runtime standalone while deliberately using the host GUI libraries.
+SYSTEM_GUI_LIBRARIES="
+libfontconfig.so.1
+libfreetype.so.6
+libpng16.so.16
+libtcl8.6.so
+libtk8.6.so
+libX11.so.6
+libXau.so.6
+libXdmcp.so.6
+libXext.so.6
+libXft.so.2
+libXrender.so.1
+libXss.so.1
+"
+for library in $SYSTEM_GUI_LIBRARIES; do
+    rm -f "$BUILD_DIR/dist/viar-scanner/_internal/$library"
+done
 
 PACKAGE_ROOT="$BUILD_DIR/package"
 install -d -m 0755 \

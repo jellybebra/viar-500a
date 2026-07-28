@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           short_sha="${GITHUB_SHA::7}"
-          version="0.4.0+git.${GITHUB_RUN_NUMBER}.${short_sha}"
+          version="0.4.1+git.${GITHUB_RUN_NUMBER}.${short_sha}"
           echo "VERSION=${version}" >> "$GITHUB_ENV"
           echo "DEB=viar-scanner_${version}_amd64.deb" >> "$GITHUB_ENV"
           echo "TAG=build-${GITHUB_RUN_NUMBER}-${short_sha}" >> "$GITHUB_ENV"
@@ -42,6 +42,14 @@ jobs:
           test_root="$(mktemp -d)"
           trap 'rm -rf "$test_root"' EXIT
           dpkg-deb --extract "$DEB" "$test_root"
+          for library in \
+            libfontconfig.so.1 libfreetype.so.6 libpng16.so.16 \
+            libtcl8.6.so libtk8.6.so libX11.so.6 libXau.so.6 \
+            libXdmcp.so.6 libXext.so.6 libXft.so.2 libXrender.so.1 \
+            libXss.so.1
+          do
+            test ! -e "$test_root/opt/viar-scanner/app/_internal/$library"
+          done
           "$test_root/opt/viar-scanner/app/viar-scanner" --self-test
           sha256sum "$DEB"
 
