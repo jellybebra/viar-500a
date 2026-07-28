@@ -2,7 +2,7 @@
 set -eu
 
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=${1:-0.3.1}
+VERSION=${1:-0.4.0}
 ARCH=$(dpkg --print-architecture)
 OUTPUT="$PROJECT_DIR/viar-scanner_${VERSION}_${ARCH}.deb"
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/viar-scanner-build.XXXXXX")
@@ -32,7 +32,13 @@ python3 -m venv "$VENV"
     opencv-contrib-python-headless==4.12.0.88 \
     Pillow==12.0.0 \
     pyinstaller==6.16.0 \
-    pyinstaller-hooks-contrib==2025.9
+    pyinstaller-hooks-contrib==2025.9 \
+    pytest==8.4.2
+
+(
+    cd "$PROJECT_DIR/third_party/camscan"
+    PYTHONPATH="$PROJECT_DIR/third_party/camscan" "$VENV/bin/pytest" tests
+)
 
 "$VENV/bin/pyinstaller" \
     --noconfirm \

@@ -86,6 +86,52 @@ def test_order_contour(contour: np.ndarray, expected_contour: np.ndarray):
     np.testing.assert_array_equal(actual=actual_contour, desired=expected_contour)
 
 
+def test_find_bright_documents_returns_separate_pages_in_reading_order():
+    image = np.full((900, 1200, 3), 18, dtype=np.uint8)
+    left = np.array([[80, 100], [545, 80], [560, 800], [95, 820]])
+    right = np.array([[650, 85], [1120, 110], [1100, 815], [635, 790]])
+    cv2.fillConvexPoly(image, left, (235, 235, 235))
+    cv2.fillConvexPoly(image, right, (245, 245, 245))
+
+    contours = scanner.find_bright_documents(image)
+
+    assert len(contours) == 2
+    centers = [np.mean(contour, axis=0) for contour in contours]
+    assert centers[0][0] < centers[1][0]
+    for contour in contours:
+        assert contour.shape == (4, 2)
+
+
+def test_crop_contour_without_perspective_keeps_axis_aligned_bounds():
+    image = np.zeros((100, 200, 3), dtype=np.uint8)
+    contour = np.array([[50, 20], [150, 30], [140, 80], [60, 70]])
+
+    cropped, ordered = scanner.crop_contour_without_perspective(image, contour)
+
+    assert ordered.shape == (4, 2)
+    assert cropped.shape[:2] == (61, 101)
+
+
+def test_fixed_page_contours_use_a3_bed_scale_and_are_centered():
+    image = np.zeros((900, 1200, 3), dtype=np.uint8)
+    a3 = scanner.fixed_page_contour(image, 420, 297)
+    a4 = scanner.fixed_page_contour(image, 210, 297)
+    a5 = scanner.fixed_page_contour(image, 148, 210)
+
+    for contour in (a3, a4, a5):
+        center = np.mean(contour, axis=0)
+        np.testing.assert_allclose(center, [600, 450], atol=1)
+
+    a3_width = a3[1][0] - a3[0][0]
+    a4_width = a4[1][0] - a4[0][0]
+    a4_height = a4[2][1] - a4[1][1]
+    a5_width = a5[1][0] - a5[0][0]
+    a5_height = a5[2][1] - a5[1][1]
+    assert a4_width == pytest.approx(a3_width / 2, abs=1)
+    assert a5_width / a5_height == pytest.approx(148 / 210, abs=0.01)
+    assert a4_width / a4_height == pytest.approx(210 / 297, abs=0.01)
+
+
 @pytest.mark.parametrize(
     "image_file, expected_contour",
     [

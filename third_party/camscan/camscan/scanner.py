@@ -379,9 +379,77 @@ def extract_contour(
     return warped, ordered_contour
 
 
-def find_bright_document(image: cv2.Mat) -> np.ndarray:
+def crop_contour_without_perspective(
+    image: cv2.Mat,
+    contour: list[tuple[int, int]],
+) -> tuple[cv2.Mat, np.ndarray]:
+    """Crop the axis-aligned bounds of a contour without perspective correction."""
+    ordered_contour = order_contour(contour=contour)
+    x, y, width, height = cv2.boundingRect(ordered_contour.astype(np.int32))
+    x0 = max(0, x)
+    y0 = max(0, y)
+    x1 = min(image.shape[1], x + width)
+    y1 = min(image.shape[0], y + height)
+    return image[y0:y1, x0:x1].copy(), ordered_contour
+
+
+def normalized_rectangle_contour(
+    image: cv2.Mat,
+    rectangle: tuple[float, float, float, float],
+) -> np.ndarray:
+    """Convert a normalized (left, top, right, bottom) rectangle to pixels."""
+    left, top, right, bottom = rectangle
+    left, right = sorted((float(np.clip(left, 0, 1)), float(np.clip(right, 0, 1))))
+    top, bottom = sorted((float(np.clip(top, 0, 1)), float(np.clip(bottom, 0, 1))))
+    width = max(1, image.shape[1] - 1)
+    height = max(1, image.shape[0] - 1)
+    return np.array(
+        [
+            [round(left * width), round(top * height)],
+            [round(right * width), round(top * height)],
+            [round(right * width), round(bottom * height)],
+            [round(left * width), round(bottom * height)],
+        ],
+        dtype=np.int32,
+    )
+
+
+def fixed_page_contour(
+    image: cv2.Mat,
+    page_width_mm: float,
+    page_height_mm: float,
+    bed_width_mm: float = 420,
+    bed_height_mm: float = 297,
+    bed_fill_ratio: float = 0.96,
+) -> np.ndarray:
     """
-    Locate a light sheet on the VIAR's dark scanning mat.
+    Return a centered fixed-size page rectangle inside the A3 scanning bed.
+
+    The VIAR camera sees an A3 landscape work area.  The small margin keeps the
+    fixed rectangles away from the physical mat edge and camera overscan.
+    """
+    scale = min(
+        image.shape[1] / bed_width_mm,
+        image.shape[0] / bed_height_mm,
+    ) * float(np.clip(bed_fill_ratio, 0.5, 1.0))
+    page_width = min(image.shape[1], page_width_mm * scale)
+    page_height = min(image.shape[0], page_height_mm * scale)
+    left = (image.shape[1] - page_width) / 2
+    top = (image.shape[0] - page_height) / 2
+    right = left + page_width
+    bottom = top + page_height
+    return np.array(
+        [[left, top], [right, top], [right, bottom], [left, bottom]],
+        dtype=np.int32,
+    )
+
+
+def _bright_document_candidates(
+    image: cv2.Mat,
+    require_dark_background: bool = True,
+) -> list[tuple[float, np.ndarray]]:
+    """
+    Return scored light rectangles found on the VIAR's dark scanning mat.
 
     The generic Hough transform below is useful for arbitrary webcams, but the
     VIAR has a much stronger and more reliable cue: paper is light and the
@@ -393,8 +461,8 @@ def find_bright_document(image: cv2.Mat) -> np.ndarray:
     # Only prefer this specialized path when the overall scene really resembles
     # the VIAR's dark mat.  Otherwise let the generic Hough algorithm handle
     # ordinary webcam scenes; this avoids mistaking a light background for paper.
-    if float(np.median(gray)) > 70:
-        return None
+    if require_dark_background and float(np.median(gray)) > 70:
+        return []
     blurred = cv2.GaussianBlur(gray, (9, 9), 0)
     _, mask = cv2.threshold(
         blurred,
@@ -429,12 +497,45 @@ def find_bright_document(image: cv2.Mat) -> np.ndarray:
         rectangularity = min(1.0, area / rectangle_area)
         candidates.append((area * rectangularity, corners))
 
+    scale = image.shape[0] / scaled.shape[0]
+    return [
+        (score, (corners * scale).astype(np.int32))
+        for score, corners in candidates
+    ]
+
+
+def find_bright_documents(image: cv2.Mat) -> list[np.ndarray]:
+    """Locate every separate light document and return them in reading order."""
+    # Two A4 sheets can cover more than half of the A3 field, making the median
+    # pixel light even though the visible gaps still provide a dark mat.
+    candidates = _bright_document_candidates(
+        image,
+        require_dark_background=False,
+    )
+    if not candidates:
+        return []
+
+    contours = [corners for _, corners in candidates]
+    heights = [
+        max(1, cv2.boundingRect(contour.astype(np.int32))[3])
+        for contour in contours
+    ]
+    row_height = max(1, int(np.median(heights) * 0.5))
+
+    def reading_order(contour: np.ndarray) -> tuple[int, float]:
+        center = np.mean(contour, axis=0)
+        return round(float(center[1]) / row_height), float(center[0])
+
+    return sorted(contours, key=reading_order)
+
+
+def find_bright_document(image: cv2.Mat) -> np.ndarray:
+    """Locate the strongest single light document on the dark scanning mat."""
+    candidates = _bright_document_candidates(image)
     if not candidates:
         return None
 
-    corners = max(candidates, key=lambda item: item[0])[1]
-    scale = image.shape[0] / scaled.shape[0]
-    return (corners * scale).astype(np.int32)
+    return max(candidates, key=lambda item: item[0])[1]
 
 
 @dataclass

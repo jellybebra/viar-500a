@@ -96,6 +96,28 @@ POSTPROCESSING_OPTIONS = {
     "Чёрно-белый": postprocessing.black_and_white,
 }
 
+SCAN_SIZE_AUTO_PERSPECTIVE = "Авто (с коррекцией перспективы)"
+SCAN_SIZE_AUTO_CROP = "Авто (без коррекции перспективы)"
+SCAN_SIZE_CUSTOM = "Пользовательский"
+SCAN_SIZE_MULTIPLE = "Множественные объекты"
+SCAN_SIZE_A3 = "A3 297х420 мм"
+SCAN_SIZE_A4 = "A4 210х297 мм"
+SCAN_SIZE_A5 = "A5 148х210 мм"
+SCAN_SIZE_OPTIONS = [
+    SCAN_SIZE_AUTO_PERSPECTIVE,
+    SCAN_SIZE_AUTO_CROP,
+    SCAN_SIZE_CUSTOM,
+    SCAN_SIZE_MULTIPLE,
+    SCAN_SIZE_A3,
+    SCAN_SIZE_A4,
+    SCAN_SIZE_A5,
+]
+FIXED_PAGE_SIZES = {
+    SCAN_SIZE_A3: (420, 297),
+    SCAN_SIZE_A4: (210, 297),
+    SCAN_SIZE_A5: (148, 210),
+}
+
 
 def process_image(
     image: cv2.Mat,
@@ -107,6 +129,47 @@ def process_image(
     if function is postprocessing.black_and_white:
         return function(image, threshold_strength=bw_threshold)
     return function(image)
+
+
+def extract_pages(
+    image: cv2.Mat,
+    scan_size: str,
+    custom_rectangle: tuple[float, float, float, float],
+) -> tuple[list[cv2.Mat], list[np.ndarray]]:
+    """Extract one or more pages according to the selected size mode."""
+    if scan_size == SCAN_SIZE_CUSTOM:
+        contour = scanner.normalized_rectangle_contour(image, custom_rectangle)
+        page, contour = scanner.crop_contour_without_perspective(image, contour)
+        return [page], [contour]
+
+    if scan_size in FIXED_PAGE_SIZES:
+        width_mm, height_mm = FIXED_PAGE_SIZES[scan_size]
+        contour = scanner.fixed_page_contour(image, width_mm, height_mm)
+        page, contour = scanner.crop_contour_without_perspective(image, contour)
+        return [page], [contour]
+
+    if scan_size == SCAN_SIZE_MULTIPLE:
+        contours = scanner.find_bright_documents(image)
+        pages = []
+        ordered_contours = []
+        for contour in contours:
+            page, ordered_contour = scanner.extract_contour(image, contour)
+            pages.append(page)
+            ordered_contours.append(ordered_contour)
+        return pages, ordered_contours
+
+    scan_result = scanner.main(image)
+    if scan_result.contour is None:
+        return [], []
+
+    if scan_size == SCAN_SIZE_AUTO_CROP:
+        page, contour = scanner.crop_contour_without_perspective(
+            image,
+            scan_result.contour,
+        )
+        return [page], [contour]
+
+    return [scan_result.warped], [scan_result.contour]
 
 # Define the list of pre-defined camera resolutions. In addition to these, the
 # user can also enter custom resolutions manually.
@@ -415,8 +478,7 @@ class CamScanApp(ctk.CTk):
         self.var_postprocessing_option = tk.StringVar(
             value=list(POSTPROCESSING_OPTIONS.keys())[0]
         )
-        self.var_two_page_mode = tk.IntVar(value=0)
-        self.var_free_capture_mode = tk.IntVar(value=0)
+        self.var_scan_size = tk.StringVar(value=SCAN_SIZE_AUTO_PERSPECTIVE)
         self.var_auto_portrait = tk.IntVar(value=1)
         self.var_bw_threshold = tk.IntVar(value=50)
         self.var_select_all_captures = tk.IntVar(value=0)
@@ -426,8 +488,10 @@ class CamScanApp(ctk.CTk):
         )
         self._preview_future = None
         self._last_submitted_frame_sequence = -1
-        self._latest_capture = (None, None, None)
-        self._bw_threshold_after_id = None
+        self._latest_capture = (None, [], [], None, None)
+        self._custom_rectangle = (0.10, 0.10, 0.90, 0.90)
+        self._custom_drag_start = None
+        self._preview_display_size = (0, 0)
         self.var_merged_captures_file_type = tk.StringVar(
             value=EXPORT_MERGED_FILE_TYPES[0]
         )
@@ -449,7 +513,7 @@ class CamScanApp(ctk.CTk):
         # Configure the left sidebar
         self.left_sidebar_frame = ctk.CTkScrollableFrame(
             self,
-            width=220,
+            width=270,
             corner_radius=0,
         )
 
@@ -499,6 +563,11 @@ class CamScanApp(ctk.CTk):
             command=self.change_bw_threshold_event,
         )
         self.bw_threshold_slider.configure(state="disabled")
+        self.apply_processing_to_all_button = ctk.CTkButton(
+            self.left_sidebar_frame,
+            text="Применить обработку\nко всем страницам",
+            command=self.apply_processing_to_all,
+        )
 
         # Add a menu for the application UI appearance
         self.appearance_mode_label = ctk.CTkLabel(
@@ -522,19 +591,22 @@ class CamScanApp(ctk.CTk):
         )
         self.scaling_option_menu.set("100%")
 
-        # Add a button for capturing the screen
+        # Select how the page area is extracted from the camera image.
         self.capture_image_label = ctk.CTkLabel(
-            self.left_sidebar_frame, text="Режим:", anchor="w"
+            self.left_sidebar_frame, text="Размер:", anchor="w"
         )
-        self.two_page_setting_check_box = ctk.CTkCheckBox(
+        self.scan_size_option_menu = ctk.CTkOptionMenu(
             self.left_sidebar_frame,
-            text="Разворот: две страницы",
-            variable=self.var_two_page_mode,
+            values=SCAN_SIZE_OPTIONS,
+            variable=self.var_scan_size,
+            command=self.change_scan_size_event,
+            width=250,
         )
-        self.free_capture_setting_check_box = ctk.CTkCheckBox(
+        self.custom_size_help_label = ctk.CTkLabel(
             self.left_sidebar_frame,
-            text="Вся область без обрезки",
-            variable=self.var_free_capture_mode,
+            text="Протяните рамку мышью\nпо предпросмотру",
+            anchor="w",
+            text_color=("gray40", "gray70"),
         )
         self.auto_portrait_check_box = ctk.CTkCheckBox(
             self.left_sidebar_frame,
@@ -593,14 +665,16 @@ class CamScanApp(ctk.CTk):
         self.postprocessing_option_menu.pack(**LEFT_MENU_PACK_KWARGS)
         self.bw_threshold_label.pack(**LEFT_MENU_PACK_KWARGS)
         self.bw_threshold_slider.pack(**LEFT_MENU_PACK_KWARGS)
+        self.apply_processing_to_all_button.pack(**LEFT_MENU_PACK_KWARGS)
         self.appearance_mode_label.pack(**LEFT_MENU_PACK_KWARGS)
         self.appearance_mode_option_menu.pack(**LEFT_MENU_PACK_KWARGS)
         self.scaling_label.pack(**LEFT_MENU_PACK_KWARGS)
         self.scaling_option_menu.pack(**LEFT_MENU_PACK_KWARGS)
         self.capture_image_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.free_capture_setting_check_box.pack(**LEFT_MENU_PACK_KWARGS)
+        self.scan_size_option_menu.pack(**LEFT_MENU_PACK_KWARGS)
+        self.custom_size_help_label.pack(**LEFT_MENU_PACK_KWARGS)
+        self.custom_size_help_label.pack_forget()
         self.auto_portrait_check_box.pack(**LEFT_MENU_PACK_KWARGS)
-        self.two_page_setting_check_box.pack(**LEFT_MENU_PACK_KWARGS)
         self.capture_image_button.pack(**LEFT_MENU_PACK_KWARGS)
         self.camera_status_label.pack(**LEFT_MENU_PACK_KWARGS)
         self.export_separate_captures_label.pack(**LEFT_MENU_PACK_KWARGS)
@@ -619,6 +693,9 @@ class CamScanApp(ctk.CTk):
             padx=0,
             pady=0,
         )
+        self.camera_image_widget.bind("<Button-1>", self.custom_selection_start)
+        self.camera_image_widget.bind("<B1-Motion>", self.custom_selection_drag)
+        self.camera_image_widget.bind("<ButtonRelease-1>", self.custom_selection_end)
 
         # Configure the right sidebar
         self.right_sidebar_frame = ctk.CTkFrame(self, corner_radius=0)
@@ -708,12 +785,12 @@ class CamScanApp(ctk.CTk):
             text=TOOLTIPS["system_ui_scaling"],
         )
         widgets.Tooltip(
-            widget=self.free_capture_setting_check_box,
-            text=TOOLTIPS["free_capture_mode"],
-        )
-        widgets.Tooltip(
-            widget=self.two_page_setting_check_box,
-            text=TOOLTIPS["two_page_mode"],
+            widget=self.scan_size_option_menu,
+            text=(
+                "Авто ищет края бумаги; фиксированные размеры используют "
+                "центральную область мата; множественный режим создаёт отдельную "
+                "страницу для каждого найденного листа."
+            ),
         )
         widgets.Tooltip(
             widget=self.capture_image_button,
@@ -748,38 +825,105 @@ class CamScanApp(ctk.CTk):
         self._preview_executor.shutdown(wait=False, cancel_futures=True)
         self.destroy()
 
-    def capture(self) -> tuple[cv2.Mat, cv2.Mat, np.ndarray]:
+    def _normalized_preview_position(self, event) -> tuple[float, float] | None:
+        """Map a mouse position on the centered preview image to 0..1 coordinates."""
+        image_width, image_height = self._preview_display_size
+        if image_width < 2 or image_height < 2:
+            return None
+        widget_width = self.camera_image_widget.winfo_width()
+        widget_height = self.camera_image_widget.winfo_height()
+        offset_x = (widget_width - image_width) / 2
+        offset_y = (widget_height - image_height) / 2
+        x = float(np.clip((event.x - offset_x) / image_width, 0, 1))
+        y = float(np.clip((event.y - offset_y) / image_height, 0, 1))
+        return x, y
+
+    def custom_selection_start(self, event):
+        """Start drawing a user-defined scan rectangle on the live preview."""
+        if self.var_scan_size.get() != SCAN_SIZE_CUSTOM:
+            return
+        self._custom_drag_start = self._normalized_preview_position(event)
+
+    def custom_selection_drag(self, event):
+        """Update the user-defined scan rectangle while the mouse is dragged."""
+        if self._custom_drag_start is None:
+            return
+        current = self._normalized_preview_position(event)
+        if current is None:
+            return
+        x0, y0 = self._custom_drag_start
+        x1, y1 = current
+        self._custom_rectangle = (
+            min(x0, x1),
+            min(y0, y1),
+            max(x0, x1),
+            max(y0, y1),
+        )
+        self._last_submitted_frame_sequence = -1
+
+    def custom_selection_end(self, event):
+        """Finish drawing the custom scan rectangle, rejecting accidental clicks."""
+        if self._custom_drag_start is None:
+            return
+        self.custom_selection_drag(event)
+        self._custom_drag_start = None
+        left, top, right, bottom = self._custom_rectangle
+        if right - left < 0.02 or bottom - top < 0.02:
+            self._custom_rectangle = (0.10, 0.10, 0.90, 0.90)
+        self._last_submitted_frame_sequence = -1
+
+    def capture(self) -> tuple[cv2.Mat, list[cv2.Mat], list[np.ndarray]]:
         """
-        Capture an image from the camera and run the document detection
-        algorithm on the resulting image.
-        :return:
-            A tuple consisting of the raw image, the extracted warped image, and
-            a numpy array describing the contours of the found document. If the
-            video capture could not read a frame successfully, return None.
+        Capture an image and extract pages using the currently selected size mode.
         """
-        cached_raw, cached_warped, cached_contour = self._latest_capture
-        if cached_raw is not None:
+        scan_size = self.var_scan_size.get()
+        custom_rectangle = tuple(self._custom_rectangle)
+        (
+            cached_raw,
+            cached_pages,
+            cached_contours,
+            cached_scan_size,
+            cached_custom_rectangle,
+        ) = self._latest_capture
+        if (
+            cached_raw is not None
+            and cached_scan_size == scan_size
+            and cached_custom_rectangle == custom_rectangle
+        ):
             return (
                 cached_raw.copy(),
-                None if cached_warped is None else cached_warped.copy(),
-                None if cached_contour is None else cached_contour.copy(),
+                [page.copy() for page in cached_pages],
+                [contour.copy() for contour in cached_contours],
             )
 
-        img_capture = self.camera.capture()
+        img_capture = (
+            cached_raw.copy()
+            if cached_raw is not None
+            else self.camera.capture()
+        )
         if img_capture is not None:
-            scan_result = scanner.main(img_capture)
-            return img_capture, scan_result.warped, scan_result.contour
-        return (None, None, None)
+            pages, contours = extract_pages(
+                img_capture,
+                scan_size=scan_size,
+                custom_rectangle=custom_rectangle,
+            )
+            return img_capture, pages, contours
+        return (None, [], [])
 
     @staticmethod
     def _process_preview_frame(
         raw_image: cv2.Mat,
         postprocessing_option: str,
         bw_threshold: int,
-        free_capture_mode: bool,
+        scan_size: str,
+        custom_rectangle: tuple[float, float, float, float],
     ):
         """Run expensive detection and preview processing outside Tk's thread."""
-        scan_result = scanner.main(raw_image)
+        pages, contours = extract_pages(
+            raw_image,
+            scan_size=scan_size,
+            custom_rectangle=custom_rectangle,
+        )
         image = process_image(
             raw_image,
             option=postprocessing_option,
@@ -787,10 +931,10 @@ class CamScanApp(ctk.CTk):
         )
         if len(image.shape) == 2:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-        if not free_capture_mode and scan_result.contour is not None:
+        for contour in contours:
             image = utils.draw_contour(
                 image=image,
-                contour=scan_result.contour,
+                contour=contour,
                 thickness=4,
             )
         image = utils.resize_with_aspect_ratio(
@@ -801,8 +945,10 @@ class CamScanApp(ctk.CTk):
         return (
             image,
             raw_image,
-            scan_result.warped,
-            scan_result.contour,
+            pages,
+            contours,
+            scan_size,
+            tuple(custom_rectangle),
         )
 
     def show_frame(self):
@@ -841,12 +987,29 @@ class CamScanApp(ctk.CTk):
 
         if self._preview_future is not None and self._preview_future.done():
             try:
-                image, capture_raw, warped, contour = self._preview_future.result()
-                self._latest_capture = (capture_raw, warped, contour)
-                image = opencv_to_ctk_image(
+                (
+                    image,
+                    capture_raw,
+                    pages,
+                    contours,
+                    scan_size,
+                    custom_rectangle,
+                ) = self._preview_future.result()
+                self._latest_capture = (
+                    capture_raw,
+                    pages,
+                    contours,
+                    scan_size,
+                    custom_rectangle,
+                )
+                image = utils.resize_with_aspect_ratio(
                     image=image,
                     width=max_width,
                     height=max_height,
+                )
+                self._preview_display_size = (image.shape[1], image.shape[0])
+                image = opencv_to_ctk_image(
+                    image=image,
                 )
                 self.camera_image_widget.photo = image
                 self.camera_image_widget.configure(image=image)
@@ -867,7 +1030,8 @@ class CamScanApp(ctk.CTk):
                 raw_image,
                 self.var_postprocessing_option.get(),
                 self.var_bw_threshold.get(),
-                bool(self.var_free_capture_mode.get()),
+                self.var_scan_size.get(),
+                tuple(self._custom_rectangle),
             )
 
         self.after(ms=CAMERA_FEED_WAIT_MS, func=self.show_frame)
@@ -887,77 +1051,49 @@ class CamScanApp(ctk.CTk):
             )
             return
 
-        full_image, warped_image, _ = self.capture()
-
-        # If we are using Free Capture mode, use the full uncropped image
-        if self.var_free_capture_mode.get():
-            if full_image is not None:
-                image = full_image
-            else:
-                messagebox.showerror(
-                    title="Ошибка",
-                    message="Не удалось получить изображение с камеры.",
-                )
-                return
-        # Otherwise, use the warped cropped extracted image
-        elif warped_image is not None:
-            image = warped_image
-        else:
+        full_image, pages, _ = self.capture()
+        if full_image is None:
+            messagebox.showerror(
+                title="Ошибка",
+                message="Не удалось получить изображение с камеры.",
+            )
+            return
+        if not pages:
             messagebox.showerror(
                 title="Лист не найден",
                 message=(
                     "Не удалось найти границы листа. Положите его на тёмную "
-                    "поверхность либо включите «Вся область без обрезки»."
+                    "поверхность либо выберите «Пользовательский» или "
+                    "фиксированный размер."
                 ),
             )
             return
 
-        # A single A4 sheet is normally portrait.  If it was placed sideways,
-        # turn the extracted page after perspective correction.  A book spread
-        # and free-area capture deliberately keep their landscape orientation.
-        if (
-            self.var_auto_portrait.get()
-            and not self.var_two_page_mode.get()
-            and not self.var_free_capture_mode.get()
-            and image.shape[1] > image.shape[0]
-        ):
-            image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
         # Give the capture a name using a timestamp string
         timestamp_str = datetime.now().strftime(r"%Y%m%d_%H%M%S_%f")
-
-        # If we are using two-page mode, cut the image into left and right parts
-        if self.var_two_page_mode.get():
-            cutoff_width = image.shape[1] // 2
-            left_image = image[:, :cutoff_width]
-            right_image = image[:, cutoff_width:]
-            new_entries = [
-                CaptureEntry(
-                    master=self.scrollable_frame,
-                    image=left_image,
-                    name=f"{timestamp_str}_1",
-                    index=len(self.entries) + 1,
-                    move_entry=self.move_entry,
-                ),
-                CaptureEntry(
-                    master=self.scrollable_frame,
-                    image=right_image,
-                    name=f"{timestamp_str}_2",
-                    index=len(self.entries) + 2,
-                    move_entry=self.move_entry,
-                ),
-            ]
-        # Otherwise, take the entire image and as as an entry
-        else:
-            new_entries = [
+        scan_size = self.var_scan_size.get()
+        new_entries = []
+        for page_number, image in enumerate(pages, start=1):
+            if (
+                self.var_auto_portrait.get()
+                and scan_size != SCAN_SIZE_A3
+                and image.shape[1] > image.shape[0]
+            ):
+                image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            name = (
+                timestamp_str
+                if len(pages) == 1
+                else f"{timestamp_str}_{page_number}"
+            )
+            new_entries.append(
                 CaptureEntry(
                     master=self.scrollable_frame,
                     image=image,
-                    name=timestamp_str,
-                    index=len(self.entries) + 1,
+                    name=name,
+                    index=len(self.entries) + page_number,
                     move_entry=self.move_entry,
                 )
-            ]
+            )
 
         # If a postprocessing function is selected, apply it to the new images
         self.apply_postprocessing(entries=new_entries)
@@ -1148,8 +1284,9 @@ class CamScanApp(ctk.CTk):
 
     def change_postprocessing_event(self, *args):
         """
-        Handle the event when the chose postprocessing function changes.
-        When it does, apply it to all current capture entries.
+        Update the live preview when the selected processing function changes.
+
+        Existing pages intentionally keep the processing used at capture time.
         """
         is_black_and_white = (
             self.var_postprocessing_option.get() == "Чёрно-белый"
@@ -1158,10 +1295,9 @@ class CamScanApp(ctk.CTk):
             state="normal" if is_black_and_white else "disabled"
         )
         self._last_submitted_frame_sequence = -1
-        self.apply_postprocessing(entries=self.entries)
 
     def change_bw_threshold_event(self, value):
-        """Update the B/W text-density threshold, debouncing page reprocessing."""
+        """Update the B/W threshold for the preview and future scans."""
         threshold = int(round(float(value)))
         self.var_bw_threshold.set(threshold)
         self.bw_threshold_label.configure(
@@ -1169,17 +1305,27 @@ class CamScanApp(ctk.CTk):
         )
         self._last_submitted_frame_sequence = -1
 
-        if self.var_postprocessing_option.get() != "Чёрно-белый":
-            return
-        if self._bw_threshold_after_id is not None:
-            self.after_cancel(self._bw_threshold_after_id)
-        self._bw_threshold_after_id = self.after(
-            180,
-            self._apply_debounced_bw_threshold,
-        )
+    def change_scan_size_event(self, selected_size=None):
+        """Update extraction mode and show custom-selection instructions if needed."""
+        is_custom = self.var_scan_size.get() == SCAN_SIZE_CUSTOM
+        if is_custom and not self.custom_size_help_label.winfo_manager():
+            self.custom_size_help_label.pack(
+                after=self.scan_size_option_menu,
+                **LEFT_MENU_PACK_KWARGS,
+            )
+        elif not is_custom and self.custom_size_help_label.winfo_manager():
+            self.custom_size_help_label.pack_forget()
+        self._latest_capture = (None, [], [], None, None)
+        self._last_submitted_frame_sequence = -1
 
-    def _apply_debounced_bw_threshold(self):
-        self._bw_threshold_after_id = None
+    def apply_processing_to_all(self):
+        """Explicitly reprocess all captured pages with the current settings."""
+        if not self.entries:
+            messagebox.showinfo(
+                title="Нет страниц",
+                message="Сначала отсканируйте хотя бы одну страницу.",
+            )
+            return
         self.apply_postprocessing(entries=self.entries)
 
     def apply_postprocessing(self, entries: list[CaptureEntry]):
