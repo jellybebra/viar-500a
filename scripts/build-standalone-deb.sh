@@ -2,7 +2,7 @@
 set -eu
 
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=${1:-0.4.1}
+VERSION=${1:-0.4.2}
 ARCH=$(dpkg --print-architecture)
 OUTPUT="$PROJECT_DIR/viar-scanner_${VERSION}_${ARCH}.deb"
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/viar-scanner-build.XXXXXX")

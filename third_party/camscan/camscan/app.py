@@ -21,7 +21,7 @@ import PIL
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-from camscan import postprocessing, widgets
+from camscan import postprocessing
 from camscan.camera import Camera
 from camscan import scanner
 from camscan import __version__
@@ -180,45 +180,6 @@ RESOLUTIONS = [
     "1280x1024",
     "640x480",
 ]
-
-# Collection of tooltip strings shown for various widgets
-TOOLTIPS = {
-    # Left panel
-    "camera_configuration": (
-        "Open camera configuration for selecting camera and resolution"
-    ),
-    "camera_driver_settings": (
-        "Open camera driver settings dialog (determined by the selected camera)"
-    ),
-    "postprocessing": "Set the postprocessing effect applied to the captured images",
-    "system_appearance": "Set the user interface appearance of the application",
-    "system_ui_scaling": "Set the user interface scale of the application",
-    "free_capture_mode": (
-        "Ignore the document detection algorithm and capture the entire image"
-    ),
-    "two_page_mode": "Split the captured image into equal left and right parts",
-    "capture": (
-        f"Capture an image and save to the captures pane (key bind {CAPTURE_KEYBIND})"
-    ),
-    "export_separate": "Export captures as separate files in a directory",
-    "export_merged": "Export captures as a single merged file",
-    # Right panel
-    "select_all": "Select or deselect all captures",
-    "delete": "Delete the selected captures",
-    # Camera Configuration Window
-    "camera_index": (
-        "Select a camera by choosing its device index. Update this list with available"
-        " devices using the camera identification button."
-    ),
-    "identify_cameras": (
-        "Identify available cameras on the system and populate the camera index list"
-    ),
-    "camera_resolution": "Set the camera resolution from a preset list of resolutions",
-    "custom_camera_resolution": (
-        "Set a custom camera resolution using a string on the form <width>x<height>"
-    ),
-}
-
 
 def opencv_to_pil_image(
     image: cv2.Mat,
@@ -510,179 +471,220 @@ class CamScanApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # Configure the left sidebar
-        self.left_sidebar_frame = ctk.CTkScrollableFrame(
+        # Keep the primary scan/PDF actions fixed while secondary settings can
+        # scroll independently on smaller screens.
+        self.left_sidebar_container = ctk.CTkFrame(
             self,
-            width=270,
+            width=285,
             corner_radius=0,
         )
+        self.left_sidebar_container.grid_columnconfigure(0, weight=1)
+        self.left_sidebar_container.grid_rowconfigure(0, weight=1)
+        self.left_sidebar_frame = ctk.CTkScrollableFrame(
+            self.left_sidebar_container,
+            width=275,
+            corner_radius=0,
+        )
+        self.primary_actions_frame = ctk.CTkFrame(
+            self.left_sidebar_container,
+            corner_radius=0,
+            border_width=1,
+        )
 
-        # Add a label to the top of the sidebar
         self.left_sidebar_title_label = ctk.CTkLabel(
             self.left_sidebar_frame,
-            text="Сканирование",
+            text="Настройки",
             font=ctk.CTkFont(size=20, weight="bold"),
         )
 
-        # Add a button for the camera settings
-        self.camera_settings_label = ctk.CTkLabel(
-            self.left_sidebar_frame, text="Камера:", anchor="w"
+        self.scan_settings_frame = ctk.CTkFrame(self.left_sidebar_frame)
+        self.scan_settings_title = ctk.CTkLabel(
+            self.scan_settings_frame,
+            text="Страница",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            anchor="w",
         )
-        self.configure_camera_button = ctk.CTkButton(
-            self.left_sidebar_frame,
-            text="Настроить камеру",
-            command=self.configure_camera_event,
+        self.capture_image_label = ctk.CTkLabel(
+            self.scan_settings_frame, text="Размер:", anchor="w"
         )
-        self.camera_settings_button = ctk.CTkButton(
-            self.left_sidebar_frame,
-            text="Параметры драйвера",
-            command=self.camera.show_settings,
+        self.scan_size_option_menu = ctk.CTkOptionMenu(
+            self.scan_settings_frame,
+            values=SCAN_SIZE_OPTIONS,
+            variable=self.var_scan_size,
+            command=self.change_scan_size_event,
+        )
+        self.custom_size_help_label = ctk.CTkLabel(
+            self.scan_settings_frame,
+            text="Протяните рамку мышью\nпо предпросмотру",
+            anchor="w",
+            text_color=("gray40", "gray70"),
+        )
+        self.auto_portrait_check_box = ctk.CTkCheckBox(
+            self.scan_settings_frame,
+            text="Автоповорот одиночного листа",
+            variable=self.var_auto_portrait,
         )
 
-        # Add a menu for the color settings
+        self.processing_frame = ctk.CTkFrame(self.left_sidebar_frame)
+        self.processing_title = ctk.CTkLabel(
+            self.processing_frame,
+            text="Обработка",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            anchor="w",
+        )
         self.postprocessing_menu_label = ctk.CTkLabel(
-            self.left_sidebar_frame, text="Обработка:", anchor="w"
+            self.processing_frame, text="Режим:", anchor="w"
         )
         self.postprocessing_option_menu = ctk.CTkOptionMenu(
-            self.left_sidebar_frame,
+            self.processing_frame,
             values=list(POSTPROCESSING_OPTIONS.keys()),
             command=self.change_postprocessing_event,
             variable=self.var_postprocessing_option,
         )
         self.bw_threshold_label = ctk.CTkLabel(
-            self.left_sidebar_frame,
+            self.processing_frame,
             text="Сохранение бледного текста: 50%",
             anchor="w",
         )
         self.bw_threshold_slider = ctk.CTkSlider(
-            self.left_sidebar_frame,
+            self.processing_frame,
             from_=0,
             to=100,
             number_of_steps=100,
             variable=self.var_bw_threshold,
             command=self.change_bw_threshold_event,
         )
-        self.bw_threshold_slider.configure(state="disabled")
         self.apply_processing_to_all_button = ctk.CTkButton(
-            self.left_sidebar_frame,
-            text="Применить обработку\nко всем страницам",
+            self.processing_frame,
+            text="Применить к готовым страницам",
             command=self.apply_processing_to_all,
         )
 
-        # Add a menu for the application UI appearance
+        self.camera_settings_frame = ctk.CTkFrame(self.left_sidebar_frame)
+        self.camera_settings_label = ctk.CTkLabel(
+            self.camera_settings_frame,
+            text="Камера",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            anchor="w",
+        )
+        self.configure_camera_button = ctk.CTkButton(
+            self.camera_settings_frame,
+            text="Источник и разрешение",
+            command=self.configure_camera_event,
+        )
+        self.camera_settings_button = ctk.CTkButton(
+            self.camera_settings_frame,
+            text="Параметры изображения",
+            command=self.camera_controls_event,
+        )
+
+        self.interface_settings_frame = ctk.CTkFrame(self.left_sidebar_frame)
+        self.interface_settings_title = ctk.CTkLabel(
+            self.interface_settings_frame,
+            text="Интерфейс",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            anchor="w",
+        )
         self.appearance_mode_label = ctk.CTkLabel(
-            self.left_sidebar_frame, text="Оформление:", anchor="w"
+            self.interface_settings_frame, text="Оформление:", anchor="w"
         )
         self.appearance_mode_option_menu = ctk.CTkOptionMenu(
-            self.left_sidebar_frame,
+            self.interface_settings_frame,
             values=["System", "Dark", "Light"],
             command=change_ui_appearance_event,
         )
         self.appearance_mode_option_menu.set("System")
-
-        # Add a menu for the application UI scaling
         self.scaling_label = ctk.CTkLabel(
-            self.left_sidebar_frame, text="Масштаб интерфейса:", anchor="w"
+            self.interface_settings_frame, text="Масштаб:", anchor="w"
         )
         self.scaling_option_menu = ctk.CTkOptionMenu(
-            self.left_sidebar_frame,
+            self.interface_settings_frame,
             values=["80%", "90%", "100%", "110%", "120%"],
             command=change_ui_scaling_event,
         )
         self.scaling_option_menu.set("100%")
 
-        # Select how the page area is extracted from the camera image.
-        self.capture_image_label = ctk.CTkLabel(
-            self.left_sidebar_frame, text="Размер:", anchor="w"
-        )
-        self.scan_size_option_menu = ctk.CTkOptionMenu(
-            self.left_sidebar_frame,
-            values=SCAN_SIZE_OPTIONS,
-            variable=self.var_scan_size,
-            command=self.change_scan_size_event,
-            width=250,
-        )
-        self.custom_size_help_label = ctk.CTkLabel(
-            self.left_sidebar_frame,
-            text="Протяните рамку мышью\nпо предпросмотру",
+        self.separate_export_frame = ctk.CTkFrame(self.left_sidebar_frame)
+        self.separate_export_title = ctk.CTkLabel(
+            self.separate_export_frame,
+            text="Отдельные изображения",
+            font=ctk.CTkFont(size=15, weight="bold"),
             anchor="w",
-            text_color=("gray40", "gray70"),
-        )
-        self.auto_portrait_check_box = ctk.CTkCheckBox(
-            self.left_sidebar_frame,
-            text="Автоповорот одиночного листа",
-            variable=self.var_auto_portrait,
-        )
-        self.capture_image_button = ctk.CTkButton(
-            self.left_sidebar_frame,
-            text="Сканировать",
-            command=self.capture_image,
-        )
-        self.camera_status_label = ctk.CTkLabel(
-            self.left_sidebar_frame,
-            text="Подключение камеры…",
-            anchor="w",
-        )
-
-        # Add a menu for exporting separate captures
-        self.export_separate_captures_label = ctk.CTkLabel(
-            self.left_sidebar_frame, text="Сохранить изображения:", anchor="w"
         )
         self.export_separate_captures_option_menu = ctk.CTkComboBox(
-            master=self.left_sidebar_frame,
+            master=self.separate_export_frame,
             values=sorted(EXPORT_SEPARATE_FILE_TYPES),
             variable=self.var_separate_captures_file_type,
             state="readonly",
         )
         self.export_separate_captures_button = ctk.CTkButton(
-            master=self.left_sidebar_frame,
+            master=self.separate_export_frame,
             text="Сохранить отдельно",
             command=self.export_separate_captures,
         )
 
-        # Add a menu for exporting merged captures
-        self.export_merged_captures_label = ctk.CTkLabel(
-            self.left_sidebar_frame, text="Готовый документ:", anchor="w"
+        self.primary_actions_title = ctk.CTkLabel(
+            self.primary_actions_frame,
+            text="Документ",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            anchor="w",
         )
-        self.export_merged_captures_option_menu = ctk.CTkComboBox(
-            master=self.left_sidebar_frame,
-            values=sorted(EXPORT_MERGED_FILE_TYPES),
-            variable=self.var_merged_captures_file_type,
-            state="readonly",
+        self.capture_image_button = ctk.CTkButton(
+            self.primary_actions_frame,
+            text="Сканировать  (Пробел)",
+            height=40,
+            command=self.capture_image,
+        )
+        self.camera_status_label = ctk.CTkLabel(
+            self.primary_actions_frame,
+            text="Подключение камеры…",
+            anchor="w",
         )
         self.export_merged_captures_button = ctk.CTkButton(
-            master=self.left_sidebar_frame,
-            text="Сохранить PDF",
+            master=self.primary_actions_frame,
+            text="Сохранить в PDF",
+            height=40,
+            fg_color=("#16803c", "#2ea043"),
+            hover_color=("#116329", "#238636"),
             command=self.export_merged_captures,
         )
 
-        # Organize left menu items
-        self.left_sidebar_title_label.pack(padx=LEFT_MENU_PAD_X, pady=20)
-        self.camera_settings_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.configure_camera_button.pack(**LEFT_MENU_PACK_KWARGS)
-        self.camera_settings_button.pack(**LEFT_MENU_PACK_KWARGS)
-        self.postprocessing_menu_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.postprocessing_option_menu.pack(**LEFT_MENU_PACK_KWARGS)
-        self.bw_threshold_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.bw_threshold_slider.pack(**LEFT_MENU_PACK_KWARGS)
-        self.apply_processing_to_all_button.pack(**LEFT_MENU_PACK_KWARGS)
-        self.appearance_mode_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.appearance_mode_option_menu.pack(**LEFT_MENU_PACK_KWARGS)
-        self.scaling_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.scaling_option_menu.pack(**LEFT_MENU_PACK_KWARGS)
-        self.capture_image_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.scan_size_option_menu.pack(**LEFT_MENU_PACK_KWARGS)
-        self.custom_size_help_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.custom_size_help_label.pack_forget()
-        self.auto_portrait_check_box.pack(**LEFT_MENU_PACK_KWARGS)
-        self.capture_image_button.pack(**LEFT_MENU_PACK_KWARGS)
-        self.camera_status_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.export_separate_captures_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.export_separate_captures_option_menu.pack(**LEFT_MENU_PACK_KWARGS)
-        self.export_separate_captures_button.pack(**LEFT_MENU_PACK_KWARGS)
-        self.export_merged_captures_label.pack(**LEFT_MENU_PACK_KWARGS)
-        self.export_merged_captures_option_menu.pack(**LEFT_MENU_PACK_KWARGS)
-        self.export_merged_captures_button.pack(**LEFT_MENU_PACK_KWARGS)
+        section_pack = dict(fill="x", padx=10, pady=(0, 8))
+        item_pack = dict(fill="x", padx=10, pady=5)
+        self.left_sidebar_title_label.pack(padx=10, pady=(14, 12))
+        self.scan_settings_frame.pack(**section_pack)
+        self.scan_settings_title.pack(**item_pack)
+        self.capture_image_label.pack(**item_pack)
+        self.scan_size_option_menu.pack(**item_pack)
+        self.auto_portrait_check_box.pack(**item_pack)
+        self.processing_frame.pack(**section_pack)
+        self.processing_title.pack(**item_pack)
+        self.postprocessing_menu_label.pack(**item_pack)
+        self.postprocessing_option_menu.pack(**item_pack)
+        self.apply_processing_to_all_button.pack(**item_pack)
+        self.camera_settings_frame.pack(**section_pack)
+        self.camera_settings_label.pack(**item_pack)
+        self.configure_camera_button.pack(**item_pack)
+        self.camera_settings_button.pack(**item_pack)
+        self.interface_settings_frame.pack(**section_pack)
+        self.interface_settings_title.pack(**item_pack)
+        self.appearance_mode_label.pack(**item_pack)
+        self.appearance_mode_option_menu.pack(**item_pack)
+        self.scaling_label.pack(**item_pack)
+        self.scaling_option_menu.pack(**item_pack)
+        self.separate_export_frame.pack(**section_pack)
+        self.separate_export_title.pack(**item_pack)
+        self.export_separate_captures_option_menu.pack(**item_pack)
+        self.export_separate_captures_button.pack(**item_pack)
+
+        self.primary_actions_title.pack(fill="x", padx=12, pady=(10, 4))
+        self.capture_image_button.pack(fill="x", padx=12, pady=4)
+        self.camera_status_label.pack(fill="x", padx=12, pady=(2, 4))
+        self.export_merged_captures_button.pack(
+            fill="x",
+            padx=12,
+            pady=(4, 12),
+        )
 
         # Configure the central widget showing the camera feed
         self.camera_image_widget = ctk.CTkLabel(self, text=None, padx=0, pady=0)
@@ -749,70 +751,18 @@ class CamScanApp(ctk.CTk):
         )
 
         # Organize main frames
-        self.left_sidebar_frame.grid(row=0, column=0, rowspan=4, sticky="nsew")
+        self.left_sidebar_container.grid(
+            row=0,
+            column=0,
+            rowspan=4,
+            sticky="nsew",
+        )
+        self.left_sidebar_frame.grid(row=0, column=0, sticky="nsew")
+        self.primary_actions_frame.grid(row=1, column=0, sticky="ew")
         self.camera_image_widget.grid(row=0, column=1, sticky="nsew")
         self.camera_image_label.grid(row=0, column=1, sticky="nsew")
         self.camera_image_widget.lift()
         self.right_sidebar_frame.grid(row=0, column=2, rowspan=4, sticky="nsew")
-
-        # Tooltips
-        # Left menu
-        widgets.Tooltip(
-            widget=self.configure_camera_button,
-            text=TOOLTIPS["camera_configuration"],
-        )
-        widgets.Tooltip(
-            widget=self.camera_settings_button,
-            text=TOOLTIPS["camera_driver_settings"],
-        )
-        widgets.Tooltip(
-            widget=self.postprocessing_option_menu,
-            text=TOOLTIPS["postprocessing"],
-        )
-        widgets.Tooltip(
-            widget=self.bw_threshold_slider,
-            text=(
-                "Увеличьте значение, если пропадают тонкие буквы. "
-                "Уменьшите, если появляется лишний чёрный шум."
-            ),
-        )
-        widgets.Tooltip(
-            widget=self.appearance_mode_option_menu,
-            text=TOOLTIPS["system_appearance"],
-        )
-        widgets.Tooltip(
-            widget=self.scaling_option_menu,
-            text=TOOLTIPS["system_ui_scaling"],
-        )
-        widgets.Tooltip(
-            widget=self.scan_size_option_menu,
-            text=(
-                "Авто ищет края бумаги; фиксированные размеры используют "
-                "центральную область мата; множественный режим создаёт отдельную "
-                "страницу для каждого найденного листа."
-            ),
-        )
-        widgets.Tooltip(
-            widget=self.capture_image_button,
-            text=TOOLTIPS["capture"],
-        )
-        widgets.Tooltip(
-            widget=self.export_separate_captures_button,
-            text=TOOLTIPS["export_separate"],
-        )
-        widgets.Tooltip(
-            widget=self.export_merged_captures_button,
-            text=TOOLTIPS["export_merged"],
-        )
-        # Right menu
-        widgets.Tooltip(
-            widget=self.select_all_captures_check_box,
-            text=TOOLTIPS["select_all"],
-        )
-        widgets.Tooltip(
-            widget=self.delete_captures_button,
-            text=TOOLTIPS["delete"],
-        )
 
         # Hotkeys
         self.bind(sequence=CAPTURE_KEYBIND, func=lambda _: self.capture_image())
@@ -1291,9 +1241,22 @@ class CamScanApp(ctk.CTk):
         is_black_and_white = (
             self.var_postprocessing_option.get() == "Чёрно-белый"
         )
-        self.bw_threshold_slider.configure(
-            state="normal" if is_black_and_white else "disabled"
-        )
+        if is_black_and_white and not self.bw_threshold_label.winfo_manager():
+            self.bw_threshold_label.pack(
+                after=self.postprocessing_option_menu,
+                fill="x",
+                padx=10,
+                pady=5,
+            )
+            self.bw_threshold_slider.pack(
+                after=self.bw_threshold_label,
+                fill="x",
+                padx=10,
+                pady=5,
+            )
+        elif not is_black_and_white:
+            self.bw_threshold_slider.pack_forget()
+            self.bw_threshold_label.pack_forget()
         self._last_submitted_frame_sequence = -1
 
     def change_bw_threshold_event(self, value):
@@ -1311,7 +1274,9 @@ class CamScanApp(ctk.CTk):
         if is_custom and not self.custom_size_help_label.winfo_manager():
             self.custom_size_help_label.pack(
                 after=self.scan_size_option_menu,
-                **LEFT_MENU_PACK_KWARGS,
+                fill="x",
+                padx=10,
+                pady=5,
             )
         elif not is_custom and self.custom_size_help_label.winfo_manager():
             self.custom_size_help_label.pack_forget()
@@ -1341,6 +1306,173 @@ class CamScanApp(ctk.CTk):
                 bw_threshold=self.var_bw_threshold.get(),
             )
             entry.set_current_image(image=new_image)
+
+    def camera_controls_event(self):
+        """Open controls that the VIAR actually exposes through V4L2."""
+        controls = self.camera.get_controls()
+        if not controls:
+            messagebox.showerror(
+                title="Параметры изображения",
+                message=(
+                    "Не удалось прочитать параметры V4L2. Проверьте, что "
+                    "установлена утилита v4l2-ctl и камера подключена."
+                ),
+            )
+            return
+
+        window = ctk.CTkToplevel(self)
+        window.title("Параметры изображения VIAR-500A")
+        window.geometry("480x720")
+        window.minsize(420, 520)
+        window.grid_columnconfigure(0, weight=1)
+        window.grid_rowconfigure(1, weight=1)
+
+        title = ctk.CTkLabel(
+            window,
+            text="Параметры изображения",
+            font=ctk.CTkFont(size=20, weight="bold"),
+        )
+        content = ctk.CTkScrollableFrame(window)
+        content.grid_columnconfigure(0, weight=1)
+        status = ctk.CTkLabel(
+            window,
+            text="Изменения применяются сразу",
+            anchor="w",
+            text_color=("gray40", "gray70"),
+        )
+        title.grid(row=0, column=0, padx=16, pady=(16, 8))
+        content.grid(row=1, column=0, padx=12, pady=4, sticky="nsew")
+        status.grid(row=2, column=0, padx=16, pady=(4, 12), sticky="ew")
+
+        pending_updates = {}
+        sliders = {}
+
+        def apply_control(name: str, value: int):
+            pending_updates.pop(name, None)
+            if self.camera.set_control(name, value):
+                status.configure(
+                    text="Изменения применены",
+                    text_color=("gray40", "gray70"),
+                )
+            else:
+                status.configure(
+                    text=f"Не удалось изменить «{name}»",
+                    text_color=("#b42318", "#ff7b72"),
+                )
+
+        def schedule_control(name: str, value: float, value_label):
+            value = int(round(value))
+            value_label.configure(text=str(value))
+            old_update = pending_updates.get(name)
+            if old_update is not None:
+                window.after_cancel(old_update)
+            pending_updates[name] = window.after(
+                120,
+                apply_control,
+                name,
+                value,
+            )
+
+        def add_slider(name: str, label: str):
+            control = controls.get(name)
+            if not control or control.get("type") != "int":
+                return None
+            row = ctk.CTkFrame(content)
+            row.grid_columnconfigure(0, weight=1)
+            header = ctk.CTkFrame(row, fg_color="transparent")
+            header.grid_columnconfigure(0, weight=1)
+            name_label = ctk.CTkLabel(header, text=label, anchor="w")
+            value_label = ctk.CTkLabel(
+                header,
+                text=str(control.get("value", control.get("default", 0))),
+                width=60,
+                anchor="e",
+            )
+            minimum = control.get("min", 0)
+            maximum = control.get("max", 100)
+            step = max(1, control.get("step", 1))
+            slider = ctk.CTkSlider(
+                row,
+                from_=minimum,
+                to=maximum,
+                number_of_steps=max(1, round((maximum - minimum) / step)),
+                command=lambda value, n=name, label=value_label: schedule_control(
+                    n,
+                    value,
+                    label,
+                ),
+            )
+            slider.set(control.get("value", control.get("default", minimum)))
+            name_label.grid(row=0, column=0, sticky="w")
+            value_label.grid(row=0, column=1, sticky="e")
+            header.pack(fill="x", padx=10, pady=(8, 2))
+            slider.pack(fill="x", padx=10, pady=(2, 10))
+            row.pack(fill="x", padx=6, pady=4)
+            sliders[name] = slider
+            return slider
+
+        def add_automatic_switch(
+            name: str,
+            label: str,
+            enabled_value: int,
+            disabled_value: int,
+            dependent_slider: str,
+        ):
+            control = controls.get(name)
+            if not control:
+                return
+            variable = tk.IntVar(
+                value=int(control.get("value", disabled_value) == enabled_value)
+            )
+
+            def update():
+                enabled = bool(variable.get())
+                apply_control(
+                    name,
+                    enabled_value if enabled else disabled_value,
+                )
+                slider = sliders.get(dependent_slider)
+                if slider is not None:
+                    slider.configure(state="disabled" if enabled else "normal")
+
+            switch = ctk.CTkSwitch(
+                content,
+                text=label,
+                variable=variable,
+                command=update,
+            )
+            switch.pack(fill="x", padx=16, pady=8)
+            slider = sliders.get(dependent_slider)
+            if slider is not None and variable.get():
+                slider.configure(state="disabled")
+
+        add_slider("brightness", "Яркость")
+        add_slider("contrast", "Контраст")
+        add_slider("saturation", "Насыщенность")
+        add_slider("hue", "Оттенок")
+        add_slider("gamma", "Гамма")
+        add_slider("sharpness", "Резкость")
+        add_slider("backlight_compensation", "Компенсация подсветки")
+        add_slider("white_balance_temperature", "Температура белого")
+        add_slider("exposure_time_absolute", "Выдержка")
+        add_automatic_switch(
+            "white_balance_automatic",
+            "Автоматический баланс белого",
+            enabled_value=1,
+            disabled_value=0,
+            dependent_slider="white_balance_temperature",
+        )
+        add_automatic_switch(
+            "auto_exposure",
+            "Автоматическая экспозиция",
+            enabled_value=3,
+            disabled_value=1,
+            dependent_slider="exposure_time_absolute",
+        )
+
+        window.lift()
+        window.attributes("-topmost", True)
+        window.after(100, window.attributes, "-topmost", False)
 
     def configure_camera_event(self):
         """
@@ -1471,29 +1603,9 @@ class CamScanApp(ctk.CTk):
         custom_camera_resolution_entry.pack(**pack_kwargs)
         custom_camera_resolution_button.pack(padx=10, pady=(5, 20))
 
-        # Add tooltips
-        widgets.Tooltip(
-            widget=camera_index_combobox,
-            text=TOOLTIPS["camera_index"],
-        )
-        widgets.Tooltip(
-            widget=find_camera_indices_button,
-            text=TOOLTIPS["identify_cameras"],
-        )
-        widgets.Tooltip(
-            widget=camera_resolution_combobox,
-            text=TOOLTIPS["camera_resolution"],
-        )
-        widgets.Tooltip(
-            widget=custom_camera_resolution_button,
-            text=TOOLTIPS["custom_camera_resolution"],
-        )
-
         # Make sure this window is on top of the main window
-        # We could simply just set topmost to True and leave it at that, but
-        # that will prevent the Tooltips from working properly. We can instead
-        # set it to topmost temporarily, use grab_set to set focus, and then
-        # set topmost back to False. This brings the window to the front.
+        # Set topmost temporarily, use grab_set to set focus, and then set
+        # topmost back to False. This brings the window to the front.
         # From the documentation it seems that using .lift(aboveThis=self) would
         # work, but I was not able to make that work.
         window.attributes("-topmost", True)

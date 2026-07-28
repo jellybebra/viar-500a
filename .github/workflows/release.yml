@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           short_sha="${GITHUB_SHA::7}"
-          version="0.4.1+git.${GITHUB_RUN_NUMBER}.${short_sha}"
+          version="0.4.2+git.${GITHUB_RUN_NUMBER}.${short_sha}"
           echo "VERSION=${version}" >> "$GITHUB_ENV"
           echo "DEB=viar-scanner_${version}_amd64.deb" >> "$GITHUB_ENV"
           echo "TAG=build-${GITHUB_RUN_NUMBER}-${short_sha}" >> "$GITHUB_ENV"

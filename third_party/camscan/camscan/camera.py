@@ -9,6 +9,9 @@ while frames are actually being read.  A background reader also prevents the
 
 import logging
 import platform
+import re
+import shutil
+import subprocess
 import threading
 import time
 
@@ -181,8 +184,91 @@ class Camera:
             raise ValueError("rotation must be one of 0, 90, 180, 270")
         self.rotation = rotation
 
-    def show_settings(self):
-        self._video_capture.set(cv2.CAP_PROP_SETTINGS, 1)
+    def get_controls(self) -> dict[str, dict]:
+        """Return the controls exported by this camera through V4L2."""
+        if SYSTEM != "Linux" or shutil.which("v4l2-ctl") is None:
+            return {}
+        try:
+            result = subprocess.run(
+                [
+                    "v4l2-ctl",
+                    "-d",
+                    f"/dev/video{self.index}",
+                    "--list-ctrls-menus",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            logging.error("Cannot read V4L2 controls: %s", error)
+            return {}
+        if result.returncode != 0:
+            logging.error("Cannot read V4L2 controls: %s", result.stderr.strip())
+            return {}
+
+        controls = {}
+        current_name = None
+        control_pattern = re.compile(
+            r"^\s*([a-z0-9_]+)\s+0x[0-9a-f]+\s+\(([^)]+)\)\s*:\s*(.*)$"
+        )
+        value_pattern = re.compile(r"(\w+)=(-?\d+)")
+        menu_pattern = re.compile(r"^\s+(\d+):\s+(.+)$")
+        for line in result.stdout.splitlines():
+            control_match = control_pattern.match(line)
+            if control_match:
+                name, control_type, details = control_match.groups()
+                values = {
+                    key: int(value)
+                    for key, value in value_pattern.findall(details)
+                }
+                controls[name] = {
+                    "type": control_type,
+                    "menu": {},
+                    **values,
+                }
+                current_name = name
+                continue
+            menu_match = menu_pattern.match(line)
+            if menu_match and current_name in controls:
+                value, label = menu_match.groups()
+                controls[current_name]["menu"][int(value)] = label
+        return controls
+
+    def set_control(self, name: str, value: int) -> bool:
+        """Set one V4L2 control without interrupting the camera stream."""
+        if (
+            SYSTEM != "Linux"
+            or shutil.which("v4l2-ctl") is None
+            or not re.fullmatch(r"[a-z0-9_]+", name)
+        ):
+            return False
+        try:
+            result = subprocess.run(
+                [
+                    "v4l2-ctl",
+                    "-d",
+                    f"/dev/video{self.index}",
+                    f"--set-ctrl={name}={int(value)}",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            logging.error("Cannot set V4L2 control %s=%s: %s", name, value, error)
+            return False
+        if result.returncode != 0:
+            logging.error(
+                "Cannot set V4L2 control %s=%s: %s",
+                name,
+                value,
+                result.stderr.strip(),
+            )
+            return False
+        return True
 
     def capture(self) -> cv2.Mat:
         """Return a copy of the newest continuously acquired frame."""
@@ -214,4 +300,5 @@ class Camera:
         return found_camera_indices
 
     def __del__(self):
-        self._release()
+        if hasattr(self, "_stop_event"):
+            self._release()
