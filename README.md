@@ -26,7 +26,7 @@ Windows-программы:
 [Releases](https://github.com/jellybebra/viar-500a/releases/latest).
 
 ```bash
-sudo apt install ./viar-scanner_0.3.0_amd64.deb
+sudo apt install ./viar-scanner_0.3.1_amd64.deb
 ```
 
 Python, OpenCV contrib, NumPy, Pillow, CustomTkinter и ресурсы интерфейса уже
@@ -65,7 +65,7 @@ sudo apt remove viar-scanner
 sh scripts/build-standalone-deb.sh
 ```
 
-Результат — единственный файл `viar-scanner_0.3.0_amd64.deb`. На компьютере,
+Результат — единственный файл `viar-scanner_0.3.1_amd64.deb`. На компьютере,
 где будет использоваться сканер, дополнительные зависимости устанавливать
 не требуется.
 

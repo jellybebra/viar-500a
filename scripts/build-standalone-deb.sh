@@ -2,7 +2,7 @@
 set -eu
 
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=${1:-0.3.0}
+VERSION=${1:-0.3.1}
 ARCH=$(dpkg --print-architecture)
 OUTPUT="$PROJECT_DIR/viar-scanner_${VERSION}_${ARCH}.deb"
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/viar-scanner-build.XXXXXX")
@@ -45,6 +45,7 @@ python3 -m venv "$VENV"
     --specpath "$BUILD_DIR" \
     --paths "$PROJECT_DIR/third_party/camscan" \
     --collect-all customtkinter \
+    --hidden-import PIL._tkinter_finder \
     "$PROJECT_DIR/packaging/viar-scanner-entry.py"
 
 PACKAGE_ROOT="$BUILD_DIR/package"

@@ -7,6 +7,7 @@ import cv2
 import customtkinter
 import numpy
 import PIL
+import PIL._tkinter_finder
 import tkinter
 
 from camscan import __version__
