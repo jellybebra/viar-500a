@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+# Remove files belonging to the older script/venv installation.  The standalone
+# application installed by this package lives in /opt/viar-scanner/app.
+rm -f /usr/local/bin/viar-scanner
+rm -rf /opt/viar-scanner/src /opt/viar-scanner/venv
+
+update-desktop-database /usr/share/applications 2>/dev/null || true
+
+exit 0

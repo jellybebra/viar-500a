@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Сканер VIAR
+GenericName=Сканер документов
+Comment=Обрезка, выравнивание и сохранение документов VIAR-500A в PDF
+Exec=/usr/local/bin/viar-scanner
+Icon=camera-photo
+Terminal=false
+Categories=Graphics;Scanning;
+Keywords=VIAR;scanner;scan;PDF;камера;сканер;
+StartupNotify=true

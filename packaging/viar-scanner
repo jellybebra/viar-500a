@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+export PYTHONPATH=/opt/viar-scanner/src
+exec /opt/viar-scanner/venv/bin/python -m camscan.app "$@"

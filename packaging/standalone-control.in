@@ -1,0 +1,11 @@
+Package: viar-scanner
+Version: @VERSION@
+Section: graphics
+Priority: optional
+Architecture: @ARCH@
+Installed-Size: @INSTALLED_SIZE@
+Maintainer: VIAR Scanner local package
+Description: VIAR-500A document scanner for Astra Linux
+ Standalone graphical application for V4L2 capture, automatic page detection,
+ perspective correction, Sauvola binarization and multi-page PDF export.
+ Python and all application-level dependencies are bundled in the package.

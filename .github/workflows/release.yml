@@ -1,0 +1,75 @@
+name: Build and release DEB
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes python3-venv python3-tk
+
+      - name: Set release version
+        shell: bash
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          version="0.3.0+git.${GITHUB_RUN_NUMBER}.${short_sha}"
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "DEB=viar-scanner_${version}_amd64.deb" >> "$GITHUB_ENV"
+          echo "TAG=build-${GITHUB_RUN_NUMBER}-${short_sha}" >> "$GITHUB_ENV"
+
+      - name: Build standalone package
+        run: sh scripts/build-standalone-deb.sh "$VERSION"
+
+      - name: Verify package
+        shell: bash
+        run: |
+          test -s "$DEB"
+          dpkg-deb --info "$DEB"
+          test_root="$(mktemp -d)"
+          trap 'rm -rf "$test_root"' EXIT
+          dpkg-deb --extract "$DEB" "$test_root"
+          "$test_root/opt/viar-scanner/app/viar-scanner" --self-test
+          sha256sum "$DEB"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: viar-scanner-${{ env.VERSION }}-amd64
+          path: ${{ env.DEB }}
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          sha256="$(sha256sum "$DEB" | awk '{print $1}')"
+          gh release create "$TAG" "$DEB" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "VIAR Scanner ${VERSION}" \
+            --latest \
+            --notes "Автономный пакет для Astra Linux amd64.
+
+          Коммит: \`${GITHUB_SHA}\`
+
+          Установка:
+          \`\`\`bash
+          sudo apt install ./${DEB}
+          \`\`\`
+
+          SHA-256: \`${sha256}\`"
