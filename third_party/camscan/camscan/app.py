@@ -258,7 +258,7 @@ class CaptureEntry:
 
         self.move_up_button = ctk.CTkButton(
             master=self.frame,
-            text="🔼",
+            text="▲",
             width=24,
             height=24,
             font=ctk.CTkFont(size=24),
@@ -276,7 +276,7 @@ class CaptureEntry:
         )
         self.move_down_button = ctk.CTkButton(
             master=self.frame,
-            text="🔽",
+            text="▼",
             width=24,
             height=24,
             font=ctk.CTkFont(size=24),
@@ -730,10 +730,10 @@ class CamScanApp(ctk.CTk):
 
         self.delete_captures_button = ctk.CTkButton(
             master=self.right_sidebar_frame,
-            text="🗑",
-            width=24,
+            text="Удалить",
+            width=80,
             height=24,
-            font=ctk.CTkFont(size=24),
+            font=ctk.CTkFont(size=13),
             fg_color="transparent",
             text_color=("#b42318", "#ff7b72"),
             hover_color=("#fee4e2", "#5c1a1a"),
