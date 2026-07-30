@@ -85,7 +85,7 @@ def test_order_contour(contour: np.ndarray, expected_contour: np.ndarray):
     in the order [Top Left, Top Right, Bottom Right, Bottom Left].
     """
     actual_contour = scanner.order_contour(contour=contour)
-    np.testing.assert_array_equal(actual=actual_contour, desired=expected_contour)
+    np.testing.assert_array_equal(actual_contour, expected_contour)
 
 
 def test_find_bright_documents_returns_separate_pages_in_reading_order():
