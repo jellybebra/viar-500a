@@ -17,22 +17,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install build tools
+      - name: Install verification libraries
         run: |
           sudo apt-get update
-          sudo apt-get install --yes python3-venv python3-tk
+          sudo apt-get install --yes python3-tk
 
       - name: Set release version
         shell: bash
         run: |
           short_sha="${GITHUB_SHA::7}"
-          version="0.4.2+git.${GITHUB_RUN_NUMBER}.${short_sha}"
+          version="0.4.3+git.${GITHUB_RUN_NUMBER}.${short_sha}"
           echo "VERSION=${version}" >> "$GITHUB_ENV"
           echo "DEB=viar-scanner_${version}_amd64.deb" >> "$GITHUB_ENV"
           echo "TAG=build-${GITHUB_RUN_NUMBER}-${short_sha}" >> "$GITHUB_ENV"
 
-      - name: Build standalone package
-        run: sh scripts/build-standalone-deb.sh "$VERSION"
+      - name: Build Debian 10 compatible standalone package
+        shell: bash
+        run: |
+          docker run --rm \
+            --env VERSION \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --workdir /workspace \
+            debian:buster-slim \
+            sh -euxc '
+              printf "%s\n" \
+                "deb http://archive.debian.org/debian buster main" \
+                > /etc/apt/sources.list
+              printf "%s\n" \
+                "Acquire::Check-Valid-Until \"false\";" \
+                > /etc/apt/apt.conf.d/99archive
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+                ca-certificates python3 python3-venv python3-tk
+              sh scripts/build-standalone-deb.sh "$VERSION"
+            '
 
       - name: Verify package
         shell: bash
@@ -50,6 +68,16 @@ jobs:
           do
             test ! -e "$test_root/opt/viar-scanner/app/_internal/$library"
           done
+          max_glibc="$(
+            find "$test_root/opt/viar-scanner/app" -type f -print0 |
+              xargs -0 -r objdump -T 2>/dev/null |
+              grep -oE 'GLIBC_[0-9]+\.[0-9]+' |
+              sort -Vu |
+              tail -1
+          )"
+          echo "Maximum required glibc symbol: $max_glibc"
+          test -n "$max_glibc"
+          ! dpkg --compare-versions "${max_glibc#GLIBC_}" gt "2.28"
           "$test_root/opt/viar-scanner/app/viar-scanner" --self-test
           sha256sum "$DEB"
 

@@ -2,7 +2,7 @@
 set -eu
 
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=${1:-0.4.2}
+VERSION=${1:-0.4.3}
 ARCH=$(dpkg --print-architecture)
 OUTPUT="$PROJECT_DIR/viar-scanner_${VERSION}_${ARCH}.deb"
 BUILD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/viar-scanner-build.XXXXXX")
@@ -26,14 +26,15 @@ done
 
 VENV="$BUILD_DIR/venv"
 python3 -m venv "$VENV"
+"$VENV/bin/pip" install --disable-pip-version-check --upgrade pip==24.0
 "$VENV/bin/pip" install --disable-pip-version-check \
     customtkinter==5.2.2 \
-    numpy==2.2.6 \
-    opencv-contrib-python-headless==4.12.0.88 \
-    Pillow==12.0.0 \
-    pyinstaller==6.16.0 \
-    pyinstaller-hooks-contrib==2025.9 \
-    pytest==8.4.2
+    numpy==1.21.6 \
+    opencv-contrib-python-headless==4.8.1.78 \
+    Pillow==9.5.0 \
+    pyinstaller==5.13.2 \
+    pyinstaller-hooks-contrib==2023.10 \
+    pytest==7.4.4
 
 (
     cd "$PROJECT_DIR/third_party/camscan"
@@ -54,11 +55,11 @@ python3 -m venv "$VENV"
     --hidden-import PIL._tkinter_finder \
     "$PROJECT_DIR/packaging/viar-scanner-entry.py"
 
-# PyInstaller copies the Ubuntu build runner's X11/Tk stack into the bundle.
-# Those libraries are ABI-compatible enough to start on Astra, but crash in
-# _XReply() as soon as Tk creates the first scanned-page thumbnail.  A graphical
-# Astra installation already provides this stack, so keep the Python/OpenCV
-# runtime standalone while deliberately using the host GUI libraries.
+# PyInstaller copies the build environment's X11/Tk stack into the bundle.
+# Mixing those libraries with Astra's window system caused crashes in _XReply().
+# A graphical Astra installation already provides this stack, so keep the
+# Python/OpenCV runtime standalone while deliberately using the host GUI
+# libraries.
 SYSTEM_GUI_LIBRARIES="
 libfontconfig.so.1
 libfreetype.so.6

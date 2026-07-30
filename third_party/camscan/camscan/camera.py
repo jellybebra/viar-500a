@@ -7,6 +7,8 @@ while frames are actually being read.  A background reader also prevents the
 2-fps full-resolution mode from blocking the Tk event loop.
 """
 
+from __future__ import annotations
+
 import logging
 import platform
 import re

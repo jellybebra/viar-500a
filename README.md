@@ -33,7 +33,7 @@ Windows-программы:
 [Releases](https://github.com/jellybebra/viar-500a/releases/latest).
 
 ```bash
-sudo apt install ./viar-scanner_0.4.2_amd64.deb
+sudo apt install ./viar-scanner_0.4.3_amd64.deb
 ```
 
 Python, OpenCV contrib, NumPy, Pillow, CustomTkinter и ресурсы интерфейса уже
@@ -79,9 +79,12 @@ sudo apt remove viar-scanner
 sh scripts/build-standalone-deb.sh
 ```
 
-Результат — единственный файл `viar-scanner_0.4.2_amd64.deb`. На компьютере,
+Результат — единственный файл `viar-scanner_0.4.3_amd64.deb`. На компьютере,
 где будет использоваться сканер, дополнительные зависимости устанавливать
 не требуется.
+
+Релиз собирается на базе Debian 10 с `glibc 2.28`, поэтому один и тот же пакет
+совместим с Astra Linux 1.7 и более новыми выпусками.
 
 Каждый push в ветку `main` запускает GitHub Actions: workflow собирает
 автономный `.deb`, выполняет тесты геометрии и обработки, проверяет встроенные

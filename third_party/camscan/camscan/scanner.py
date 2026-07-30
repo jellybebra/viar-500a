@@ -3,6 +3,8 @@ This module defines the algorithm for detecting and extracting documents from
 images and its related parameters and helper functions.
 """
 
+from __future__ import annotations
+
 import math
 import itertools
 from dataclasses import dataclass

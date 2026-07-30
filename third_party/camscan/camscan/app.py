@@ -5,6 +5,8 @@ part of the application, as well as the code used to handle, post process, and
 export the captured images.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 import concurrent.futures
 import functools
@@ -772,7 +774,7 @@ class CamScanApp(ctk.CTk):
     def close_event(self):
         """Release the V4L2 stream before closing the application."""
         self.camera.close()
-        self._preview_executor.shutdown(wait=False, cancel_futures=True)
+        self._preview_executor.shutdown(wait=False)
         self.destroy()
 
     def _normalized_preview_position(self, event) -> tuple[float, float] | None:
