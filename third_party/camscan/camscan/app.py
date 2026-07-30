@@ -26,6 +26,7 @@ from tkinter import filedialog, messagebox
 from camscan import postprocessing
 from camscan.camera import Camera
 from camscan import scanner
+from camscan.settings import SettingsStore
 from camscan import __version__
 import utils
 
@@ -434,17 +435,40 @@ class CamScanApp(ctk.CTk):
     """
 
     def __init__(self):
+        self.settings_store = SettingsStore()
+        self.settings = self.settings_store.load()
+        ctk.set_appearance_mode(self.settings["appearance_mode"])
+        ctk.set_widget_scaling(
+            int(self.settings["ui_scaling"].replace("%", "")) / 100
+        )
         super().__init__()
 
-        self.camera = Camera()
+        saved_resolution = tuple(
+            int(part) for part in self.settings["camera_resolution"].split("x")
+        )
+        verified_rates = {
+            (2592, 1944): 2,
+            (2048, 1536): 3,
+            (1600, 1200): 5,
+            (1280, 1024): 7.5,
+            (640, 480): 30,
+        }
+        self.camera = Camera(
+            index=self.settings["camera_index"],
+            resolution=saved_resolution,
+            target_fps=verified_rates.get(saved_resolution, 2),
+        )
         self.entries = []
         self.var_postprocessing_option = tk.StringVar(
-            value=list(POSTPROCESSING_OPTIONS.keys())[0]
+            value=self.settings["postprocessing"]
         )
-        self.var_scan_size = tk.StringVar(value=SCAN_SIZE_AUTO_PERSPECTIVE)
-        self.var_auto_portrait = tk.IntVar(value=1)
-        self.var_bw_threshold = tk.IntVar(value=50)
+        self.var_scan_size = tk.StringVar(value=self.settings["scan_size"])
+        self.var_auto_portrait = tk.IntVar(
+            value=int(self.settings["auto_portrait"])
+        )
+        self.var_bw_threshold = tk.IntVar(value=self.settings["bw_threshold"])
         self.var_select_all_captures = tk.IntVar(value=0)
+        self._settings_save_after_id = None
         self._preview_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=1,
             thread_name_prefix="viar-preview",
@@ -459,7 +483,7 @@ class CamScanApp(ctk.CTk):
             value=EXPORT_MERGED_FILE_TYPES[0]
         )
         self.var_separate_captures_file_type = tk.StringVar(
-            value=EXPORT_SEPARATE_FILE_TYPES[0]
+            value=self.settings["separate_file_type"]
         )
         self.var_select_all_captures = tk.IntVar(value=0)
 
@@ -525,6 +549,7 @@ class CamScanApp(ctk.CTk):
             self.scan_settings_frame,
             text="Автоповорот одиночного листа",
             variable=self.var_auto_portrait,
+            command=self.schedule_preferences_save,
         )
 
         self.processing_frame = ctk.CTkFrame(self.left_sidebar_frame)
@@ -545,7 +570,10 @@ class CamScanApp(ctk.CTk):
         )
         self.bw_threshold_label = ctk.CTkLabel(
             self.processing_frame,
-            text="Сохранение бледного текста: 50%",
+            text=(
+                "Сохранение бледного текста: "
+                f"{self.var_bw_threshold.get()}%"
+            ),
             anchor="w",
         )
         self.bw_threshold_slider = ctk.CTkSlider(
@@ -593,18 +621,18 @@ class CamScanApp(ctk.CTk):
         self.appearance_mode_option_menu = ctk.CTkOptionMenu(
             self.interface_settings_frame,
             values=["System", "Dark", "Light"],
-            command=change_ui_appearance_event,
+            command=self.change_ui_appearance_event,
         )
-        self.appearance_mode_option_menu.set("System")
+        self.appearance_mode_option_menu.set(self.settings["appearance_mode"])
         self.scaling_label = ctk.CTkLabel(
             self.interface_settings_frame, text="Масштаб:", anchor="w"
         )
         self.scaling_option_menu = ctk.CTkOptionMenu(
             self.interface_settings_frame,
             values=["80%", "90%", "100%", "110%", "120%"],
-            command=change_ui_scaling_event,
+            command=self.change_ui_scaling_event,
         )
-        self.scaling_option_menu.set("100%")
+        self.scaling_option_menu.set(self.settings["ui_scaling"])
 
         self.separate_export_frame = ctk.CTkFrame(self.left_sidebar_frame)
         self.separate_export_title = ctk.CTkLabel(
@@ -618,6 +646,7 @@ class CamScanApp(ctk.CTk):
             values=sorted(EXPORT_SEPARATE_FILE_TYPES),
             variable=self.var_separate_captures_file_type,
             state="readonly",
+            command=lambda _value: self.schedule_preferences_save(),
         )
         self.export_separate_captures_button = ctk.CTkButton(
             master=self.separate_export_frame,
@@ -769,13 +798,63 @@ class CamScanApp(ctk.CTk):
         # Hotkeys
         self.bind(sequence=CAPTURE_KEYBIND, func=lambda _: self.capture_image())
 
+        self.change_postprocessing_event()
+        self.change_scan_size_event()
         self.show_frame()
 
     def close_event(self):
         """Release the V4L2 stream before closing the application."""
+        self.save_preferences()
         self.camera.close()
         self._preview_executor.shutdown(wait=False)
         self.destroy()
+
+    def collect_preferences(self):
+        """Copy the current persistent controls into the settings dictionary."""
+        self.settings.update(
+            {
+                "appearance_mode": self.appearance_mode_option_menu.get(),
+                "scan_size": self.var_scan_size.get(),
+                "postprocessing": self.var_postprocessing_option.get(),
+                "bw_threshold": self.var_bw_threshold.get(),
+                "auto_portrait": bool(self.var_auto_portrait.get()),
+                "ui_scaling": self.scaling_option_menu.get(),
+                "camera_index": self.camera.index,
+                "camera_resolution": "x".join(map(str, self.camera.resolution)),
+                "separate_file_type": (
+                    self.var_separate_captures_file_type.get()
+                ),
+            }
+        )
+
+    def save_preferences(self):
+        """Persist current user choices immediately."""
+        if self._settings_save_after_id is not None:
+            try:
+                self.after_cancel(self._settings_save_after_id)
+            except (tk.TclError, ValueError):
+                pass
+            self._settings_save_after_id = None
+        self.collect_preferences()
+        self.settings_store.save(self.settings)
+
+    def schedule_preferences_save(self):
+        """Debounce frequent UI changes before writing the settings file."""
+        self.collect_preferences()
+        if self._settings_save_after_id is not None:
+            self.after_cancel(self._settings_save_after_id)
+        self._settings_save_after_id = self.after(300, self.save_preferences)
+
+    def change_ui_appearance_event(self, new_appearance_mode: str):
+        """Apply and remember the selected interface theme."""
+        ctk.set_appearance_mode(new_appearance_mode)
+        self.schedule_preferences_save()
+
+    def change_ui_scaling_event(self, new_scaling: str):
+        """Apply and remember the selected interface scale."""
+        new_scaling_float = int(new_scaling.replace("%", "")) / 100
+        ctk.set_widget_scaling(new_scaling_float)
+        self.schedule_preferences_save()
 
     def _normalized_preview_position(self, event) -> tuple[float, float] | None:
         """Map a mouse position on the centered preview image to 0..1 coordinates."""
@@ -1164,6 +1243,7 @@ class CamScanApp(ctk.CTk):
         # Bring up a dialog asking for the output file path
         file_path = filedialog.asksaveasfilename(
             initialfile=initialfile,
+            initialdir=self.settings["pdf_directory"],
             defaultextension=".pdf",
             filetypes=[("PDF Documents", "*.pdf"), ("All Files", "*.*")],
         )
@@ -1185,6 +1265,10 @@ class CamScanApp(ctk.CTk):
             append_images=remaining_images,
             resolution=300.0,
         )
+        self.settings["pdf_directory"] = os.path.dirname(
+            os.path.abspath(file_path)
+        )
+        self.save_preferences()
 
         # Show a message box indicating to the user that the export succeeded
         messagebox.showinfo(
@@ -1260,6 +1344,7 @@ class CamScanApp(ctk.CTk):
             self.bw_threshold_slider.pack_forget()
             self.bw_threshold_label.pack_forget()
         self._last_submitted_frame_sequence = -1
+        self.schedule_preferences_save()
 
     def change_bw_threshold_event(self, value):
         """Update the B/W threshold for the preview and future scans."""
@@ -1269,6 +1354,7 @@ class CamScanApp(ctk.CTk):
             text=f"Сохранение бледного текста: {threshold}%"
         )
         self._last_submitted_frame_sequence = -1
+        self.schedule_preferences_save()
 
     def change_scan_size_event(self, selected_size=None):
         """Update extraction mode and show custom-selection instructions if needed."""
@@ -1284,6 +1370,7 @@ class CamScanApp(ctk.CTk):
             self.custom_size_help_label.pack_forget()
         self._latest_capture = (None, [], [], None, None)
         self._last_submitted_frame_sequence = -1
+        self.schedule_preferences_save()
 
     def apply_processing_to_all(self):
         """Explicitly reprocess all captured pages with the current settings."""
@@ -1485,6 +1572,7 @@ class CamScanApp(ctk.CTk):
         def _set_camera_index(index: int):
             """Callback for changing the camera device index"""
             self.camera.set_index(index=int(index))
+            self.schedule_preferences_save()
 
         def _update_available_camera_indices():
             """Callback for updating the available camera device indices"""
@@ -1501,6 +1589,7 @@ class CamScanApp(ctk.CTk):
             if matches:
                 resolution = (int(matches[0][0]), int(matches[0][1]))
                 self.camera.set_resolution(resolution=resolution)
+                self.schedule_preferences_save()
             else:
                 messagebox.showerror(
                     title="Ошибка",
@@ -1613,25 +1702,6 @@ class CamScanApp(ctk.CTk):
         window.attributes("-topmost", True)
         window.grab_set()
         window.attributes("-topmost", False)
-
-
-def change_ui_appearance_event(new_appearance_mode: str):
-    """
-    Handle the event to update the application appearance.
-    :param new_appearance_mode: The appearance mode (System, Dark, Light)
-    """
-    ctk.set_appearance_mode(new_appearance_mode)
-
-
-def change_ui_scaling_event(new_scaling: str):
-    """
-    Handle the event to update the application UI scale.
-    :param new_scaling: The new scaling string on the form XX%
-    """
-    new_scaling_float = int(new_scaling.replace("%", "")) / 100
-    ctk.set_widget_scaling(new_scaling_float)
-
-
 if __name__ == "__main__":
     app = CamScanApp()
     app.mainloop()
