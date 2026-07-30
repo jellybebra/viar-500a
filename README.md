@@ -78,6 +78,18 @@ Python, OpenCV contrib, NumPy, Pillow, CustomTkinter и ресурсы инте�
 sudo apt remove viar-scanner
 ```
 
+## Ручная диагностика для разработчика
+
+В каталоге `scripts` оставлены три инструмента для разбора проблем без GUI:
+
+- `test-camscan-camera.py` получает реальный кадр с VIAR;
+- `test-camscan-pipeline.py` сохраняет промежуточные этапы обрезки и обработки;
+- `test-bw-thresholds.py` создаёт варианты Sauvola с разной силой сохранения
+  бледного текста.
+
+Они запускаются из окружения с зависимостями приложения и с
+`PYTHONPATH=third_party/camscan`.
+
 ## Сборка автономного пакета
 
 Сборка выполняется один раз на Astra Linux с доступом к интернету:
